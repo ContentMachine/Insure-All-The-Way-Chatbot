@@ -5,9 +5,7 @@ chromadb
 sentence-transformers
 langchain-community
 pypdf
-pymongo 
-python-dotenv 
-
+pymongo  
 requests 
 beautifulsoup4 
 firecrawl
@@ -15,11 +13,17 @@ youtube-transcript-api
 apscheduler
 google-api-python-client
 torch
-pymongo
 pdfminer.six
 psutil
 langchain-huggingface
 pymupdf
+fastapi
+uvicorn
+gridfs
+fitz  
+
+
+
 
 
 
