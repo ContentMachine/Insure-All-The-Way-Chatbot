@@ -19,7 +19,6 @@ langchain-huggingface
 pymupdf
 fastapi
 uvicorn
-gridfs
 fitz  
 
 
