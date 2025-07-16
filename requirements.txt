@@ -16,10 +16,9 @@ torch
 pdfminer.six
 psutil
 langchain-huggingface
-pymupdf
 fastapi
 uvicorn
-fitz  
+PyMuPDF==1.22.5
 
 
 
