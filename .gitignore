@@ -1,0 +1,38 @@
+trainingData/
+
+# 🐍 Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+
+# 🧪 Virtual Envs
+venv/
+env/
+.chatbot_env/
+
+# 🔑 Secrets
+.env
+
+# 🧠 Vector store + generated index
+faiss_index/
+vector_db/
+
+# 📦 IDEs & Editors
+.idea/
+.vscode/
+
+# 📄 Logs & temp
+*.log
+
+# 🐍 Jupyter Notebooks (optional)
+*.ipynb_checkpoints
+
+# OS metadata
+.DS_Store
+
+# Build outputs (if any in the future)
+dist/
+build/
+*.egg-info/

@@ -1,0 +1,1 @@
+uvicorn chatbot:app --reload, to restart fast API server
