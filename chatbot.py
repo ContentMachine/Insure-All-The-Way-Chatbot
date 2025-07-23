@@ -13,7 +13,7 @@ import fitz  # PyMuPDF
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain.vectorstores import FAISS
-from langchain.embeddings import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from huggingface_hub import InferenceClient
 
 
