@@ -32,10 +32,18 @@ db = mongo_client[MONGO_DB]
 fs = GridFS(db)
 
 # === FastAPI Setup === #
+
+origins = [
+    "http://localhost:3000", 
+    "http://localhost:3001",
+    "http://localhost:3002",   
+    "https://insurealltheway.co", 
+]
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
