@@ -12,7 +12,7 @@ from io import BytesIO
 import fitz  # PyMuPDF
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
 from huggingface_hub import InferenceClient
 
@@ -32,10 +32,18 @@ db = mongo_client[MONGO_DB]
 fs = GridFS(db)
 
 # === FastAPI Setup === #
+
+origins = [
+    "http://localhost:3000", 
+    "http://localhost:3001",
+    "http://localhost:3002",   
+    "https://insurealltheway.co", 
+]
+
 app = FastAPI()
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -86,7 +94,7 @@ def load_vector_db():
 
     if os.path.exists("faiss_index"):
         print("Loading existing FAISS vector DB...")
-        vector_db = FAISS.load_local("faiss_index", embedding)
+        vector_db = FAISS.load_local("faiss_index", embedding,  allow_dangerous_deserialization=True)
     else:
         print("No existing FAISS index found. Building new vector DB...")
         vector_db = build_vector_db()
@@ -108,20 +116,27 @@ def fetch_context(query: str, threshold: float = 0.3) -> str:
 def ask_mistral(prompt: str, context: str = "", fallback_enabled=True) -> str:
     if context:
         full_prompt = (
-            f"You are an insurance assistant for Insure All The Way.\n"
-            f"Answer based ONLY on the context below.\n\n"
+            "You are an insurance assistant for Insure All The Way.\n"
+            "Only answer using the information in the provided context.\n"
+            "Do not add extra details, do not explain beyond what is provided.\n"
+            "If the answer is not in the context, reply strictly with: "
+            "'Insure All The Way does not currently offer this service.'\n\n"
             f"Context:\n{context}\n\n"
-            f"Question:\n{prompt}"
+            f"Question:\n{prompt}\n\n"
+            "Answer in 1–3 sentences, direct and factual."
         )
     else:
         if fallback_enabled:
             full_prompt = (
-                f"You are an insurance assistant for Insure All The Way.\n"
-                f"Answer the following question based on your best knowledge.\n\n"
-                f"Question:\n{prompt}"
+                "You are an insurance assistant for Insure All The Way.\n"
+                "If you cannot find relevant info in company documentation, reply strictly with: "
+                "'Insure All The Way does not currently offer this service.'\n\n"
+                f"Question:\n{prompt}\n\n"
+                "Answer in 1–3 sentences, direct and factual."
             )
         else:
             return "<p>Sorry, I couldn't find any relevant information.</p>"
+
 
     try:
         response = client.chat_completion(
@@ -164,7 +179,7 @@ def detect_intent(message: str, user_id=None):
 
     elif "email:" in msg:
         email = msg.split("email:")[1].strip()
-        return get_policies_by_email(email)
+        return get_policy_by_registration(email)
 
     elif any(kw in msg for kw in ["buy", "purchase", "get insurance", "price", "quote", "rate", "cost", "coverage", "enroll"]):
         return (
@@ -179,16 +194,12 @@ def detect_intent(message: str, user_id=None):
     # === PRIMARY CONTEXTUAL ANSWER ===
     context = fetch_context(message)
     
-    if context and len(context.strip()) > 50:  # only fallback if context is weak
+    if context and len(context.strip()) > 50:
         response = ask_mistral(message, context)
-        return f"<p>{response}</p><p>Need more info? <a href='https://insurealltheway.co' target='_blank'>Explore our offerings here</a>.</p>"
+        return f"<p>{response}</p>"
     
-    # === FALLBACK to LLM ===
-    fallback_response = ask_mistral(message)
-    return (
-        f"<p><em>(No detailed match found in official document. Here's a general answer:)</em></p>"
-        f"<p>{fallback_response}</p>"
-    )
+    fallback_response = ask_mistral(message, context="", fallback_enabled=True)
+    return f"<p>{fallback_response}</p>"
 
 
 
