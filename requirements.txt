@@ -19,6 +19,7 @@ langchain-huggingface
 fastapi
 uvicorn
 PyMuPDF==1.22.5
+faiss-cpu
 
 
 
