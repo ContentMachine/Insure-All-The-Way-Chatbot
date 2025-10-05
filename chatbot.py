@@ -8,36 +8,29 @@ from gridfs import GridFS
 from bson import ObjectId
 from fastapi.middleware.cors import CORSMiddleware
 from io import BytesIO
-
-import fitz  # PyMuPDF
+import fitz  
 from langchain.schema import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS
 from langchain_huggingface import HuggingFaceEmbeddings
-from huggingface_hub import InferenceClient
+from mistralai import Mistral
+import re
 
-
-
-# === ENV SETUP === #
 load_dotenv()
-HF_TOKEN = os.getenv("HF_API_KEY")
+MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
 MONGO_URI = os.getenv("MONGODB_URI")
 MONGO_DB = os.getenv("MONGODB_DATABASE")
-CHROMA_DIR = "chroma_db"
 
-# === DB & Model Clients === #
-client = InferenceClient(model="mistralai/Mistral-7B-Instruct-v0.3", token=HF_TOKEN)
+mistral_client = Mistral(api_key=MISTRAL_API_KEY) 
 mongo_client = MongoClient(MONGO_URI)
 db = mongo_client[MONGO_DB]
 fs = GridFS(db)
 
-# === FastAPI Setup === #
-
 origins = [
-    "http://localhost:3000", 
+    "http://localhost:3000",
     "http://localhost:3001",
-    "http://localhost:3002",   
-    "https://insurealltheway.co", 
+    "http://localhost:3002",
+    "https://insurealltheway.co",
 ]
 
 app = FastAPI()
@@ -53,7 +46,6 @@ class ChatRequest(BaseModel):
     message: str
     user_id: str = None
 
-# === PDF Embedding Pipeline === #
 def extract_text_from_pdf_stream(pdf_stream, source_name):
     pdf_stream.seek(0)
     doc = fitz.open(stream=pdf_stream.read(), filetype="pdf")
@@ -66,11 +58,11 @@ def extract_text_from_pdf_stream(pdf_stream, source_name):
 
 def load_pdfs_from_mongodb():
     documents = []
-    target_filename = "Insure All The Way Website Information.pdf"
+    target_filename = "Insure All The Way Website Information2.pdf"
 
     grid_out = fs.find_one({"filename": target_filename})
     if not grid_out:
-        raise FileNotFoundError(f"❌ '{target_filename}' not found in GridFS.")
+        raise FileNotFoundError(f"'{target_filename}' not found in GridFS.")
 
     pdf_stream = BytesIO(grid_out.read())
     documents.extend(extract_text_from_pdf_stream(pdf_stream, target_filename))
@@ -94,7 +86,7 @@ def load_vector_db():
 
     if os.path.exists("faiss_index"):
         print("Loading existing FAISS vector DB...")
-        vector_db = FAISS.load_local("faiss_index", embedding,  allow_dangerous_deserialization=True)
+        vector_db = FAISS.load_local("faiss_index", embedding, allow_dangerous_deserialization=True)
     else:
         print("No existing FAISS index found. Building new vector DB...")
         vector_db = build_vector_db()
@@ -104,21 +96,51 @@ def load_vector_db():
 
 retriever = load_vector_db()
 
-def fetch_context(query: str, threshold: float = 0.3) -> str:
+def fetch_context(query: str) -> str:
     docs = retriever.get_relevant_documents(query)
     if not docs:
         return ""
-    
     context_text = "\n\n".join([doc.page_content for doc in docs])
     return context_text
+
+
+INTENTS = ["greeting", "farewell", "policy_lookup", "website_info", "general_qa"]
+
+def classify_intent(message: str) -> str:
+    try:
+        prompt = f"""
+You are Uju, an intent classifier for an insurance chatbot.
+
+Classify the user message into ONE of these intents:
+1. policy_lookup → if the user provides a registration number, policy ID, or email tied to their account.
+2. website_info → if the user asks about products, services, or offerings of Insure All The Way 
+   (e.g., "What policies do you offer?", "Do you provide third-party insurance?", "How can I renew?").
+3. greeting → greetings like "hello", "hi", "hey".
+4. farewell → goodbyes like "bye", "see you", "goodnight".
+5. general_qa → anything else (casual questions, chit-chat, insurance in general).
+
+User message: "{message}"
+
+Respond with ONLY one of: policy_lookup, website_info, greeting, farewell, general_qa
+"""
+        response = mistral_client.chat.complete(
+            model="mistral-small-2503",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.0,
+            max_tokens=10
+        )
+        intent = response.choices[0].message.content.strip().lower()
+        return intent if intent in INTENTS else "general_qa"
+    except Exception as e:
+        print("Intent classification failed:", e)
+        return "general_qa"
 
 
 def ask_mistral(prompt: str, context: str = "", fallback_enabled=True) -> str:
     if context:
         full_prompt = (
             "You are an insurance assistant for Insure All The Way.\n"
-            "Only answer using the information in the provided context.\n"
-            "Do not add extra details, do not explain beyond what is provided.\n"
+            "Answer ONLY using the information in the provided context.\n"
             "If the answer is not in the context, reply strictly with: "
             "'Insure All The Way does not currently offer this service.'\n\n"
             f"Context:\n{context}\n\n"
@@ -137,20 +159,18 @@ def ask_mistral(prompt: str, context: str = "", fallback_enabled=True) -> str:
         else:
             return "<p>Sorry, I couldn't find any relevant information.</p>"
 
-
     try:
-        response = client.chat_completion(
+        response = mistral_client.chat.complete(
+            model="mistral-small-2503",
             messages=[{"role": "user", "content": full_prompt}],
-            max_tokens=500,
             temperature=0.3,
+            max_tokens=500,
             top_p=0.9
         )
-        return response.choices[0].message["content"].strip()
+        return response.choices[0].message.content.strip()
     except Exception as e:
         return f"<p><strong>Error:</strong> {e}</p>"
 
-
-# === DB Utilities === #
 def get_policy_by_registration(registration_number):
     policy = db["insurancePolicies"].find_one({"registrationNumber": registration_number})
     if not policy:
@@ -169,47 +189,43 @@ def get_policy_by_registration(registration_number):
     )
 
 def detect_intent(message: str, user_id=None):
-    msg = message.lower()
+    intent = classify_intent(message)
 
-    # Predefined intents
-    if "registration" in msg or "plate number" in msg:
-        words = message.split()
-        reg_num = next((w for w in words if len(w) >= 6 and any(c.isdigit() for c in w)), None)
-        return get_policy_by_registration(reg_num) if reg_num else "<p>Please provide a valid registration number.</p>"
+    if intent == "greeting":
+        return "<p>Hello 👋! How can I help you with your insurance today?</p>"
 
-    elif "email:" in msg:
-        email = msg.split("email:")[1].strip()
-        return get_policy_by_registration(email)
+    if intent == "farewell":
+        return "<p>Goodbye! 👋 Stay safe and insured with Insure All The Way.</p>"
 
-    elif any(kw in msg for kw in ["buy", "purchase", "get insurance", "price", "quote", "rate", "cost", "coverage", "enroll"]):
-        return (
-            "<p>You can explore our insurance offerings here:</p>"
-            "<ul>"
-            "<li><a href='https://insurealltheway.co/motor-insurance' target='_blank'>Motor Insurance</a></li>"
-            "<li><a href='https://insurealltheway.co/health-insurance' target='_blank'>Health Insurance</a></li>"
-            "<li><a href='https://insurealltheway.co/property-insurance' target='_blank'>Property Insurance</a></li>"
-            "</ul>"
-        )
+    if intent == "policy_lookup":
+        email_match = re.search(r'[\w\.-]+@[\w\.-]+', message)
+        if email_match:
+            return get_policy_by_registration(email_match.group())
+        reg_match = re.search(r'\b[A-Z0-9]{6,}\b', message.upper())
+        if reg_match:
+            return get_policy_by_registration(reg_match.group())
+        return "<p>Please provide a valid registration number or email.</p>"
 
-    # === PRIMARY CONTEXTUAL ANSWER ===
-    context = fetch_context(message)
-    
-    if context and len(context.strip()) > 50:
-        response = ask_mistral(message, context)
+    if intent == "website_info":
+        context = fetch_context(message)
+        if context and len(context.strip()) > 50:
+            response = ask_mistral(message, context)
+            return f"<p>{response}</p>"
+        else:
+            return "<p>I couldn’t find that in our knowledge base, but you can explore our offerings here: <a href='https://insurealltheway.co/insurance-products' target='_blank'>Insurance Products</a></p>"
+
+    if intent == "general_qa":
+        response = ask_mistral(message, context='', fallback_enabled=True)
         return f"<p>{response}</p>"
-    
-    fallback_response = ask_mistral(message, context="", fallback_enabled=True)
-    return f"<p>{fallback_response}</p>"
+
+    return "<p>Sorry, I didn’t quite understand that.</p>"
 
 
-
-# === Endpoint === #
 @app.post("/chat")
 def chat(req: ChatRequest):
     reply = detect_intent(req.message, req.user_id)
     return {"reply": reply, "format": "html"}
 
-# === Optional: CLI to rebuild the DB === #
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--rebuild", action="store_true", help="Rebuild the vector DB")
@@ -219,3 +235,4 @@ if __name__ == "__main__":
         print("📦 Rebuilding vector DB from MongoDB GridFS PDF...")
         build_vector_db()
         print("✅ Vector DB rebuilt and saved to disk.")
+

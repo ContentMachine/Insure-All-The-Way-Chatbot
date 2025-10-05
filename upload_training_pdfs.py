@@ -305,8 +305,8 @@ MONGO_URI = os.getenv("MONGODB_URI")
 MONGO_DB = os.getenv("MONGODB_DATABASE")
 
 # === Configuration === #
-pdf_file_path = "/Users/mac/Desktop/Wdw/ChatBot2/trainingData/Insurance All The Way Training Data.pdf"  
-file_name_in_mongo = "Insure All The Way Website Information.pdf" 
+pdf_file_path = "/Users/mac/Desktop/Wdw/ChatBot2/trainingData/INSURE ALL THE WAY TRAINING DATA.pdf"  
+file_name_in_mongo = "Insure All The Way Website Information2.pdf" 
 
 # === Connect to MongoDB === #
 client = MongoClient(MONGO_URI)
